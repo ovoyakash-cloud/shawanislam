@@ -1,9 +1,30 @@
-import React from 'react';
+import React, { useState, useRef } from 'react';
 import { usePortfolio } from '../context/PortfolioContext';
-import { Lock, ArrowUp } from 'lucide-react';
+import { ArrowUp, Shield } from 'lucide-react';
 
 export const Footer: React.FC = () => {
   const { data, openAdmin } = usePortfolio();
+
+  // 7-clicks secret trigger for footer as well
+  const [footerClicks, setFooterClicks] = useState(0);
+  const footerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleFooterSecretClick = () => {
+    if (footerTimerRef.current) {
+      clearTimeout(footerTimerRef.current);
+    }
+
+    const next = footerClicks + 1;
+    if (next >= 7) {
+      setFooterClicks(0);
+      openAdmin();
+    } else {
+      setFooterClicks(next);
+      footerTimerRef.current = setTimeout(() => {
+        setFooterClicks(0);
+      }, 2500);
+    }
+  };
 
   const scrollToTop = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -46,18 +67,17 @@ export const Footer: React.FC = () => {
             © {new Date().getFullYear()} {data.profile.name}. All rights reserved.
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <span className="text-slate-500">Pabna, Bangladesh</span>
             <span className="text-slate-700">·</span>
             
-            {/* Discreet Admin Trigger */}
+            {/* Discreet secret icon requiring 7 clicks (no suspicious text) */}
             <button
-              onClick={openAdmin}
-              className="inline-flex items-center gap-1.5 text-slate-500 hover:text-sky-400 transition-colors py-1 px-2 rounded-md hover:bg-slate-800/80"
-              title="Admin Control Panel (Shortcut: Ctrl + Shift + A)"
+              onClick={handleFooterSecretClick}
+              className="p-1 text-slate-700 hover:text-slate-500 transition-colors select-none focus:outline-hidden"
+              aria-label="Protected"
             >
-              <Lock className="w-3.5 h-3.5" />
-              <span>Admin Portal</span>
+              <Shield className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>

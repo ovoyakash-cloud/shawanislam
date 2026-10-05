@@ -1,18 +1,45 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { usePortfolio } from '../context/PortfolioContext';
 import { Menu, X, Shield, ArrowUpRight } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
-  const { data, openAdmin } = usePortfolio();
+  const { openAdmin } = usePortfolio();
   const [scrolled, setScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // 7-clicks secret trigger logic
+  const [clickCount, setClickCount] = useState(0);
+  const clickTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleSecretIconClick = () => {
+    if (clickTimeoutRef.current) {
+      clearTimeout(clickTimeoutRef.current);
+    }
+
+    const nextCount = clickCount + 1;
+    if (nextCount >= 7) {
+      setClickCount(0);
+      openAdmin();
+    } else {
+      setClickCount(nextCount);
+      // Reset if no further clicks within 2.5 seconds
+      clickTimeoutRef.current = setTimeout(() => {
+        setClickCount(0);
+      }, 2500);
+    }
+  };
 
   useEffect(() => {
     const handleScroll = () => {
       setScrolled(window.scrollY > 20);
     };
     window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      if (clickTimeoutRef.current) {
+        clearTimeout(clickTimeoutRef.current);
+      }
+    };
   }, []);
 
   const navLinks = [
@@ -58,11 +85,11 @@ export const Navbar: React.FC = () => {
 
           {/* Zone 3: 1-2 primary actions */}
           <div className="flex items-center gap-3">
+            {/* Secret Admin Trigger: Requires 7 rapid clicks to open */}
             <button
-              onClick={openAdmin}
-              title="Admin Portal (Secret: Ctrl+Shift+A)"
-              className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-              aria-label="Open Admin"
+              onClick={handleSecretIconClick}
+              className="p-2 text-slate-300 hover:text-slate-500 rounded-lg transition-colors cursor-default select-none focus:outline-hidden"
+              aria-label="Security Badge"
             >
               <Shield className="w-4 h-4" />
             </button>

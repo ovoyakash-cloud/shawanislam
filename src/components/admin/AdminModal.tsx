@@ -18,7 +18,8 @@ export const AdminModal: React.FC = () => {
     supabaseConfig,
     closeAdmin,
     verifyPin,
-    resetPinToDefault,
+    requestSecurityOtp,
+    resetPinWithOtp,
     logoutAdmin,
     changePin,
     updateProfile,
@@ -46,6 +47,16 @@ export const AdminModal: React.FC = () => {
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
   const [pinResetNotice, setPinResetNotice] = useState('');
+
+  // Database OTP Verification State
+  const [isOtpResetMode, setIsOtpResetMode] = useState(false);
+  const [isRequestingOtp, setIsRequestingOtp] = useState(false);
+  const [otpDispatchedMsg, setOtpDispatchedMsg] = useState('');
+  const [inputOtp, setInputOtp] = useState('');
+  const [newOtpPin, setNewOtpPin] = useState('');
+  const [confirmOtpPin, setConfirmOtpPin] = useState('');
+  const [otpError, setOtpError] = useState('');
+  const [otpSuccess, setOtpSuccess] = useState('');
 
   // Active tab inside authenticated admin
   type AdminTab = 'profile' | 'projects' | 'cv' | 'services_skills' | 'messages' | 'pin' | 'supabase';
@@ -109,15 +120,65 @@ export const AdminModal: React.FC = () => {
       setPinResetNotice('');
       setPinInput('');
     } else {
-      setPinError('Incorrect Admin PIN. Please check or use default (1234).');
+      setPinError('Incorrect Admin Security PIN.');
     }
   };
 
-  const handleResetPinClick = () => {
-    resetPinToDefault();
-    setPinInput('1234');
-    setPinError('');
-    setPinResetNotice('Admin PIN has been reset to default "1234". Click "Unlock Dashboard" to log in.');
+  // Request 6-digit OTP dispatched to Database
+  const handleRequestOtp = async () => {
+    setIsRequestingOtp(true);
+    setOtpError('');
+    setOtpDispatchedMsg('');
+    try {
+      const res = await requestSecurityOtp();
+      setIsRequestingOtp(false);
+      if (res.success) {
+        setOtpDispatchedMsg(
+          'A secure 6-digit verification code has been dispatched directly to your Supabase database vault! Check your database records to retrieve the code (valid for 10 minutes).'
+        );
+      } else {
+        setOtpError('Failed to generate verification code. Check database connection.');
+      }
+    } catch (err: any) {
+      setIsRequestingOtp(false);
+      setOtpError(err?.message || 'Error dispatching verification code.');
+    }
+  };
+
+  // Verify OTP and Set New PIN
+  const handleVerifyOtpAndResetPin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setOtpError('');
+    setOtpSuccess('');
+
+    if (!inputOtp || inputOtp.trim().length !== 6) {
+      setOtpError('Please enter the 6-digit OTP code found in your database.');
+      return;
+    }
+    if (!newOtpPin || newOtpPin.trim().length < 4) {
+      setOtpError('New PIN must be at least 4 digits/characters.');
+      return;
+    }
+    if (newOtpPin !== confirmOtpPin) {
+      setOtpError('New PIN and Confirm PIN do not match.');
+      return;
+    }
+
+    const res = await resetPinWithOtp(inputOtp.trim(), newOtpPin.trim());
+    if (res.success) {
+      setOtpSuccess('Security authorization verified! Your new PIN has been successfully set.');
+      setInputOtp('');
+      setNewOtpPin('');
+      setConfirmOtpPin('');
+      setOtpDispatchedMsg('');
+      setTimeout(() => {
+        setIsOtpResetMode(false);
+        setOtpSuccess('');
+        setPinResetNotice('Your new PIN has been set. You can now unlock the dashboard with your new PIN.');
+      }, 2500);
+    } else {
+      setOtpError(res.error || 'Failed to verify code.');
+    }
   };
 
   // Handle PIN Change
@@ -142,19 +203,56 @@ export const AdminModal: React.FC = () => {
     }
   };
 
-  // Handle Image File Upload (converts file to Base64)
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>, target: 'hero' | 'about' | 'project') => {
+  // Helper to downscale and compress images before storing to prevent quota issues
+  const compressImage = (file: File, maxDim = 1400, quality = 0.85): Promise<string> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new window.Image();
+        img.onload = () => {
+          let { width, height } = img;
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            resolve(canvas.toDataURL('image/jpeg', quality));
+          } else {
+            resolve(e.target?.result as string);
+          }
+        };
+        img.onerror = () => resolve(e.target?.result as string);
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = () => resolve('');
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // Handle Image File Upload (compresses and stores)
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>, target: 'hero' | 'about' | 'project') => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 5 * 1024 * 1024) {
-      alert('Image file is too large. Please select an image under 5MB.');
+    if (file.size > 10 * 1024 * 1024) {
+      alert('Image file is too large. Please select an image under 10MB.');
       return;
     }
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const result = reader.result as string;
+    try {
+      const result = await compressImage(file);
+      if (!result) return;
+
       if (target === 'hero') {
         updatePhoto(result);
         setProfileForm(prev => ({ ...prev, photoUrl: result }));
@@ -164,8 +262,9 @@ export const AdminModal: React.FC = () => {
       } else if (target === 'project') {
         setProjectForm(prev => ({ ...prev, imageUrl: result }));
       }
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      console.warn('Image processing warning:', err);
+    }
   };
 
   // Handle CV PDF File Upload
@@ -347,17 +446,21 @@ export const AdminModal: React.FC = () => {
           </div>
         </div>
 
-        {/* Not Authenticated: PIN Login View with PIN Recovery */}
+        {/* Not Authenticated: PIN Login View with Secure Database OTP Verification */}
         {!isAuthenticated ? (
-          <div className="p-8 sm:p-14 flex flex-col items-center justify-center text-center space-y-6 max-w-md mx-auto">
+          <div className="p-8 sm:p-12 flex flex-col items-center justify-center text-center space-y-6 max-w-md mx-auto">
             <div className="w-16 h-16 rounded-2xl bg-sky-50 text-[#0284C7] flex items-center justify-center border border-sky-100 shadow-sm">
               <Lock className="w-8 h-8" />
             </div>
 
             <div>
-              <h3 className="text-xl font-bold text-slate-900">Protected Admin Portal</h3>
+              <h3 className="text-xl font-bold text-slate-900">
+                {isOtpResetMode ? 'Database OTP Authorization' : 'Protected Admin Portal'}
+              </h3>
               <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                Enter your 4-digit security PIN to update photos, CV files, projects, content, and Supabase database.
+                {isOtpResetMode
+                  ? 'A secure 6-digit verification code (OTP) will be dispatched directly to your private database vault. Check your database records to retrieve the code and set a new PIN.'
+                  : 'Enter your secret security PIN to access the portfolio content management dashboard.'}
               </p>
             </div>
 
@@ -368,45 +471,166 @@ export const AdminModal: React.FC = () => {
               </div>
             )}
 
-            <form onSubmit={handlePinSubmit} className="w-full space-y-4">
-              <div>
-                <input
-                  type="password"
-                  maxLength={10}
-                  autoFocus
-                  value={pinInput}
-                  onChange={(e) => setPinInput(e.target.value)}
-                  placeholder="Enter Admin PIN"
-                  className="w-full text-center text-2xl tracking-[0.3em] font-mono py-3.5 px-4 bg-slate-50 border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#0284C7] focus:bg-white transition-all"
-                />
-                {pinError && (
-                  <p className="text-xs text-red-600 mt-2 font-medium">{pinError}</p>
-                )}
-              </div>
-
-              <button
-                type="submit"
-                className="w-full py-3 px-4 bg-[#0284C7] hover:bg-[#0369A1] text-white text-xs font-semibold rounded-xl shadow-xs transition-colors"
-              >
-                Unlock Dashboard
-              </button>
-
-              <div className="pt-2 flex flex-col items-center gap-2">
-                <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-[11px] text-slate-500 w-full text-center">
-                  Default PIN is <strong className="font-mono text-slate-800 font-bold">1234</strong>.
+            {!isOtpResetMode ? (
+              /* Standard PIN Login */
+              <form onSubmit={handlePinSubmit} className="w-full space-y-4">
+                <div>
+                  <input
+                    type="password"
+                    maxLength={10}
+                    autoFocus
+                    value={pinInput}
+                    onChange={(e) => setPinInput(e.target.value)}
+                    placeholder="Enter Security PIN"
+                    className="w-full text-center text-2xl tracking-[0.3em] font-mono py-3.5 px-4 bg-slate-50 border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#0284C7] focus:bg-white transition-all"
+                  />
+                  {pinError && (
+                    <p className="text-xs text-red-600 mt-2 font-medium">{pinError}</p>
+                  )}
                 </div>
 
-                {/* Instant PIN reset button if mistake was made */}
                 <button
-                  type="button"
-                  onClick={handleResetPinClick}
-                  className="text-xs text-[#0284C7] hover:text-[#0369A1] hover:underline font-semibold flex items-center gap-1.5 py-1"
+                  type="submit"
+                  className="w-full py-3 px-4 bg-[#0284C7] hover:bg-[#0369A1] text-white text-xs font-semibold rounded-xl shadow-xs transition-colors"
                 >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Made a mistake or forgot PIN? Reset PIN to 1234</span>
+                  Unlock Dashboard
                 </button>
-              </div>
-            </form>
+
+                <div className="pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsOtpResetMode(true);
+                      setPinError('');
+                      setPinResetNotice('');
+                      setOtpError('');
+                      setOtpSuccess('');
+                    }}
+                    className="text-xs text-slate-500 hover:text-[#0284C7] hover:underline font-semibold flex items-center justify-center gap-1.5 mx-auto transition-colors"
+                  >
+                    <Mail className="w-3.5 h-3.5 text-[#0284C7]" />
+                    <span>Forgot PIN? Send Security OTP to ovoyakash@gmail.com</span>
+                  </button>
+                </div>
+              </form>
+            ) : (
+              /* Secure Database & Email OTP Verification Form */
+              <form onSubmit={handleVerifyOtpAndResetPin} className="w-full space-y-4 text-left">
+                {otpSuccess && (
+                  <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl flex items-center gap-2">
+                    <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>{otpSuccess}</span>
+                  </div>
+                )}
+
+                {otpError && (
+                  <div className="p-3 bg-red-50 border border-red-200 text-red-800 text-xs rounded-xl flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                    <span>{otpError}</span>
+                  </div>
+                )}
+
+                {otpDispatchedMsg && (
+                  <div className="p-3 bg-sky-50 border border-sky-200 text-sky-900 text-xs rounded-xl flex items-center gap-2">
+                    <Mail className="w-4 h-4 text-[#0284C7] shrink-0" />
+                    <span className="leading-relaxed">{otpDispatchedMsg}</span>
+                  </div>
+                )}
+
+                {/* Step 1: Request Code Button */}
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-semibold text-slate-800">
+                      Send to: <span className="text-[#0284C7] font-mono font-bold">ovoyakash@gmail.com</span>
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      Dispatches 6-digit OTP code to your inbox & database
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRequestOtp}
+                    disabled={isRequestingOtp}
+                    className="px-3.5 py-2 bg-[#0284C7] hover:bg-[#0369A1] text-white text-xs font-semibold rounded-lg shrink-0 transition-colors flex items-center gap-1.5 shadow-2xs"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRequestingOtp ? 'animate-spin' : ''}`} />
+                    <span>{isRequestingOtp ? 'Sending...' : 'Send OTP to Email'}</span>
+                  </button>
+                </div>
+
+                {/* Step 2: Input OTP */}
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700 block">
+                    Enter 6-Digit OTP Code *
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={6}
+                    required
+                    value={inputOtp}
+                    onChange={(e) => setInputOtp(e.target.value.replace(/\D/g, ''))}
+                    placeholder="Enter 6-digit code"
+                    className="w-full text-center text-lg tracking-[0.25em] font-mono py-2.5 px-3 bg-slate-50 border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#0284C7] focus:bg-white"
+                  />
+                  <span className="text-[10px] text-slate-400 block">
+                    Check your email inbox (or spam folder) for ovoyakash@gmail.com, or check Supabase database records.
+                  </span>
+                </div>
+
+                {/* Step 3: Set New PIN */}
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700 block">
+                    New Security PIN (Min 4 digits) *
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    minLength={4}
+                    value={newOtpPin}
+                    onChange={(e) => setNewOtpPin(e.target.value)}
+                    placeholder="Enter your new secret PIN"
+                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#0284C7] focus:bg-white"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700 block">
+                    Confirm New Security PIN *
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    minLength={4}
+                    value={confirmOtpPin}
+                    onChange={(e) => setConfirmOtpPin(e.target.value)}
+                    placeholder="Re-enter your new secret PIN"
+                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#0284C7] focus:bg-white"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Verify Code & Set New PIN</span>
+                </button>
+
+                <div className="text-center pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsOtpResetMode(false);
+                      setOtpError('');
+                      setOtpDispatchedMsg('');
+                    }}
+                    className="text-xs text-slate-500 hover:text-slate-800 transition-colors"
+                  >
+                    ← Back to PIN Login
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         ) : (
           /* Authenticated Dashboard */
@@ -549,7 +773,7 @@ export const AdminModal: React.FC = () => {
 
                       <div className="flex items-center gap-4">
                         <img
-                          src={profileForm.photoUrl}
+                          src={profileForm.photoUrl || '/src/assets/images/hero_designer_portrait_1791181928056.jpg'}
                           alt="Hero Preview"
                           className="w-20 h-20 rounded-xl object-cover border-2 border-sky-400 shadow-xs"
                         />
@@ -598,7 +822,7 @@ export const AdminModal: React.FC = () => {
 
                       <div className="flex items-center gap-4">
                         <img
-                          src={profileForm.aboutPhotoUrl}
+                          src={profileForm.aboutPhotoUrl || '/src/assets/images/about_design_studio_1791181942784.jpg'}
                           alt="About Preview"
                           className="w-20 h-20 rounded-xl object-cover border-2 border-slate-300 shadow-xs"
                         />
@@ -904,11 +1128,11 @@ export const AdminModal: React.FC = () => {
                             className="flex-1 w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg"
                           />
                         </div>
-                        {projectForm.imageUrl && (
+                        {Boolean(projectForm.imageUrl) && (
                           <div className="mt-2">
                             <span className="text-[11px] text-slate-500 block mb-1">Image Preview:</span>
                             <img
-                              src={projectForm.imageUrl}
+                              src={projectForm.imageUrl || '/src/assets/images/project_brand_identity_1791181954785.jpg'}
                               alt="Preview"
                               className="h-28 rounded-lg object-cover border border-slate-200"
                             />
@@ -1000,7 +1224,7 @@ export const AdminModal: React.FC = () => {
                         >
                           <div className="flex items-center gap-3">
                             <img
-                              src={p.imageUrl}
+                              src={p.imageUrl || '/src/assets/images/project_brand_identity_1791181954785.jpg'}
                               alt={p.title}
                               className="w-14 h-14 rounded-lg object-cover border border-slate-100"
                             />
@@ -1430,7 +1654,7 @@ export const AdminModal: React.FC = () => {
                         required
                         value={oldPin}
                         onChange={(e) => setOldPin(e.target.value)}
-                        placeholder="Current PIN (Default is 1234)"
+                        placeholder="Enter your current PIN"
                         className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg"
                       />
                     </div>
@@ -1467,18 +1691,6 @@ export const AdminModal: React.FC = () => {
                         className="px-5 py-2.5 bg-[#0284C7] hover:bg-[#0369A1] text-white text-xs font-semibold rounded-lg transition-colors"
                       >
                         Update Admin PIN
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (confirm('Reset PIN back to default "1234"?')) {
-                            resetPinToDefault();
-                            alert('Admin PIN has been reset to "1234".');
-                          }
-                        }}
-                        className="px-3.5 py-2.5 text-xs text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg"
-                      >
-                        Reset PIN to 1234
                       </button>
                     </div>
                   </form>
@@ -1655,18 +1867,18 @@ export const AdminModal: React.FC = () => {
                   <div className="pt-4 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
                       <div className="text-xs font-semibold text-slate-800">Master Reset: Restore Entire Site to Fresh CV</div>
-                      <div className="text-[11px] text-slate-500">Restore all initial records, photos, projects, and PIN back to 1234.</div>
+                      <div className="text-[11px] text-slate-500">Restore all initial records, photos, and project portfolio data from CV.</div>
                     </div>
                     <button
                       onClick={() => {
-                        if (confirm('Are you sure you want to reset all content, photos, projects and PIN back to the default CV values?')) {
+                        if (confirm('Are you sure you want to reset all profile content, photos, and projects back to the default CV values?')) {
                           resetToDefaults();
                           alert('Reset all content to original CV values successfully!');
                         }
                       }}
                       className="px-3.5 py-2 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-50 border border-red-200 rounded-lg self-start sm:self-auto"
                     >
-                      Master Reset (All Data)
+                      Master Reset (Portfolio Data)
                     </button>
                   </div>
 

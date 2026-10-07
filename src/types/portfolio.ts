@@ -65,6 +65,15 @@ export interface ContactMessage {
   read: boolean;
 }
 
+export interface SecurityOtp {
+  id: string;
+  code: string;
+  createdAt: string;
+  expiresAt: string;
+  used: boolean;
+  attempts: number;
+}
+
 export interface PortfolioProfile {
   name: string;
   roleTitle: string;

@@ -3,6 +3,7 @@ import { SiteData, PortfolioProfile, Project, Service, SkillItem, WorkExperience
 import { INITIAL_DATA } from '../data/initialData';
 import {
   getLocalSiteData,
+  getIdbSiteData,
   saveLocalSiteData,
   getLocalMessages,
   saveLocalMessages,
@@ -14,6 +15,8 @@ import {
   saveSupabaseConfig,
   resetSupabaseConfigToDefault,
   testRemoteSupabaseConnection,
+  generateAndSaveSecurityOtp,
+  verifySecurityOtp,
   SupabaseConfig
 } from '../lib/supabase';
 
@@ -29,7 +32,8 @@ interface PortfolioContextType {
   verifyPin: (pin: string) => boolean;
   logoutAdmin: () => void;
   changePin: (oldPin: string, newPin: string) => { success: boolean; error?: string };
-  resetPinToDefault: () => void;
+  requestSecurityOtp: () => Promise<{ success: boolean; message: string; expiryMinutes: number }>;
+  resetPinWithOtp: (otp: string, newPin: string) => Promise<{ success: boolean; error?: string }>;
   updateProfile: (profile: Partial<PortfolioProfile>) => void;
   updatePhoto: (photoUrl: string) => void;
   updateAboutPhoto: (photoUrl: string) => void;
@@ -76,6 +80,17 @@ export const PortfolioProvider: React.FC<{ children: ReactNode }> = ({ children 
   useEffect(() => {
     let isMounted = true;
     async function loadRemote() {
+      // 1. Check IndexedDB for full cached assets (images, PDFs)
+      try {
+        const idbData = await getIdbSiteData();
+        if (idbData && isMounted) {
+          setData(idbData);
+        }
+      } catch {
+        // Fallback
+      }
+
+      // 2. Sync with remote Supabase
       const remoteData = await fetchRemoteSiteData();
       if (remoteData && isMounted) {
         setData(remoteData);
@@ -140,9 +155,25 @@ export const PortfolioProvider: React.FC<{ children: ReactNode }> = ({ children 
     return false;
   };
 
-  const resetPinToDefault = () => {
-    const updated = { ...data, adminPin: '1234' };
+  const requestSecurityOtp = async () => {
+    return generateAndSaveSecurityOtp();
+  };
+
+  const resetPinWithOtp = async (otp: string, newPin: string): Promise<{ success: boolean; error?: string }> => {
+    if (!newPin || newPin.trim().length < 4) {
+      return { success: false, error: 'New PIN must be at least 4 digits.' };
+    }
+    const verifyResult = await verifySecurityOtp(otp);
+    if (!verifyResult.valid) {
+      return { success: false, error: verifyResult.error || 'Invalid verification code.' };
+    }
+
+    const updated: SiteData = {
+      ...data,
+      adminPin: newPin.trim(),
+    };
     commitData(updated);
+    return { success: true };
   };
 
   const logoutAdmin = () => {
@@ -321,7 +352,8 @@ export const PortfolioProvider: React.FC<{ children: ReactNode }> = ({ children 
         openAdmin,
         closeAdmin,
         verifyPin,
-        resetPinToDefault,
+        requestSecurityOtp,
+        resetPinWithOtp,
         logoutAdmin,
         changePin,
         updateProfile,

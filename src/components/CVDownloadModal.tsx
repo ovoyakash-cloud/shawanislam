@@ -83,7 +83,7 @@ export const CVDownloadModal: React.FC<CVDownloadModalProps> = ({ isOpen, onClos
             <div className="flex flex-col sm:flex-row gap-6 items-start justify-between pb-6 border-b-2 border-slate-200">
               <div className="flex gap-5 items-center">
                 <img
-                  src={data.profile.photoUrl}
+                  src={data.profile.photoUrl || '/src/assets/images/hero_designer_portrait_1791181928056.jpg'}
                   alt={data.profile.name}
                   referrerPolicy="no-referrer"
                   className="w-24 h-24 sm:w-28 sm:h-28 rounded-xl object-cover border-2 border-sky-500 shadow-xs"

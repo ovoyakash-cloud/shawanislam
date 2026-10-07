@@ -36,7 +36,7 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({ project,
         <div className="overflow-y-auto p-6 sm:p-8 space-y-6">
           <div className="relative aspect-16/9 rounded-xl overflow-hidden bg-slate-100 border border-slate-200">
             <img
-              src={project.imageUrl}
+              src={project.imageUrl || '/src/assets/images/project_brand_identity_1791181954785.jpg'}
               alt={project.title}
               referrerPolicy="no-referrer"
               className="w-full h-full object-cover"

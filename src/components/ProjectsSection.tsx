@@ -69,7 +69,7 @@ export const ProjectsSection: React.FC<ProjectsSectionProps> = ({ onSelectProjec
                 {/* Image Container */}
                 <div className="relative aspect-4/3 overflow-hidden bg-slate-100">
                   <img
-                    src={project.imageUrl}
+                    src={project.imageUrl || '/src/assets/images/project_brand_identity_1791181954785.jpg'}
                     alt={project.title}
                     referrerPolicy="no-referrer"
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"

@@ -148,7 +148,7 @@ export const Hero: React.FC<HeroProps> = ({ onOpenCvModal }) => {
               {/* Designer Portrait Image with crisp cut-out styling */}
               <div className="relative z-10 w-[90%] h-[95%] rounded-b-full overflow-hidden flex items-end justify-center shadow-lg border-b-4 border-white/60">
                 <img
-                  src={data.profile.photoUrl}
+                  src={data.profile.photoUrl || '/src/assets/images/hero_designer_portrait_1791181928056.jpg'}
                   alt={data.profile.name}
                   referrerPolicy="no-referrer"
                   className="w-full h-full object-cover object-top hover:scale-105 transition-transform duration-500"
